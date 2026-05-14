@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Eva's Toothbrush Time! 🪥</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { 
+    width: 100%; height: 100%; overflow: hidden; 
+    background: #e8f5e9; 
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    touch-action: manipulation;
+    user-select: none;
+  }
+  #game { 
+    width: 100%; height: 100%; 
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    position: relative;
+  }
+  canvas { display: block; }
+
+  .ui-overlay {
+    position: absolute; top: 0; left: 0; width: 100%;
+    text-align: center; pointer-events: none;
+  }
+  .title {
+    font-size: clamp(24px, 6vw, 42px); font-weight: 800;
+    color: #ff6f91; margin-top: 16px;
+    text-shadow: 2px 2px 0 #fff, -1px -1px 0 #fff;
+  }
+  .subtitle {
+    font-size: clamp(14px, 3.5vw, 20px); color: #66bb6a; font-weight: 600;
+    margin-top: 2px;
+  }
+  .score {
+    font-size: clamp(16px, 4vw, 24px); color: #ffa726; font-weight: 700;
+    margin-top: 6px;
+  }
+  .message {
+    position: absolute; bottom: 20%; left: 50%; transform: translateX(-50%);
+    font-size: clamp(20px, 5vw, 36px); font-weight: 800; 
+    color: #ff6f91; text-align: center;
+    text-shadow: 2px 2px 0 #fff;
+    pointer-events: none; opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .message.show { opacity: 1; }
+  .reset-btn {
+    position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+    padding: 14px 40px; font-size: 18px; font-weight: 700;
+    background: #ff6f91; color: #fff; border: none; border-radius: 50px;
+    cursor: pointer; pointer-events: all;
+    box-shadow: 0 4px 12px rgba(255,111,145,0.4);
+    display: none;
+  }
+  .reset-btn.show { display: block; }
+</style>
+</head>
+<body>
+<div id="game">
+  <div class="ui-overlay">
+    <div class="title">🪥 Eva's Toothbrush Time!</div>
+    <div class="subtitle">Tap the dirty spots to scrub clean!</div>
+    <div class="score" id="score">🧼 0 spots cleaned</div>
+  </div>
+  <div class="message" id="message"></div>
+  <button class="reset-btn" id="resetBtn" onclick="resetGame()">🪥 Brush Again!</button>
+  <canvas id="canvas"></canvas>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const msgEl = document.getElementById('message');
+const scoreEl = document.getElementById('score');
+const resetBtn = document.getElementById('resetBtn');
+
+let W, H, tooth, spots, particles, waterDrops, cleaned, totalSpots, phase;
+let sparkleTimer = 0;
+let flushProgress = 0;
+
+const COLORS = ['#ff6f91','#ff9671','#ffc75f','#845ec2','#00c9a7','#4d8076'];
+const PASTELS = ['#f3e5f5','#e8f5e9','#fff3e0','#e3f2fd','#fce4ec','#f1f8e9'];
+
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  W = r.width; H = r.height;
+  canvas.width = W * (window.devicePixelRatio || 1);
+  canvas.height = H * (window.devicePixelRatio || 1);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+}
+
+function init() {
+  resize();
+  const cx = W / 2;
+  const cy = H / 2;
+  const toothW = Math.min(W * 0.55, 380);
+  const toothH = toothW * 1.35;
+
+  tooth = { x: cx - toothW / 2, y: cy - toothH / 2 - 20, w: toothW, h: toothH };
+  
+  totalSpots = 8;
+  spots = [];
+  const margin = toothW * 0.15;
+  for (let i = 0; i < totalSpots; i++) {
+    spots.push({
+      x: tooth.x + margin + Math.random() * (toothW - margin * 2),
+      y: tooth.y + margin + Math.random() * (toothH - margin * 2),
+      r: toothW * 0.06 + Math.random() * toothW * 0.05,
+      color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      alive: true,
+      wiggle: Math.random() * Math.PI * 2,
+    });
+  }
+
+  particles = [];
+  waterDrops = [];
+  cleaned = 0;
+  phase = 'scrubbing';
+  flushProgress = 0;
+  sparkleTimer = 0;
+  msgEl.classList.remove('show');
+  msgEl.textContent = '';
+  resetBtn.classList.remove('show');
+  scoreEl.textContent = `🧼 0 / ${totalSpots} spots`;
+  loop();
+}
+
+function drawTooth() {
+  const { x, y, w, h } = tooth;
+  ctx.save();
+  
+  const cx = x + w / 2, cy = y + h / 2;
+  
+  // Main tooth body - round rect
+  const r = w * 0.22;
+  ctx.beginPath();
+  // Top (crown) - two bumps
+  const bumpW = w * 0.38;
+  const bumpH = h * 0.15;
+  // Left bump
+  ctx.moveTo(x + w * 0.05, y + h * 0.35);
+  ctx.bezierCurveTo(x + w * 0.05, y + bumpH + h * 0.05, 
+                     cx - bumpW * 0.7, y + h * 0.02,
+                     cx - bumpW * 0.2, y);
+  ctx.bezierCurveTo(cx, y - bumpH * 0.1,
+                     cx + bumpW * 0.2, y,
+                     cx + bumpW * 0.7, y + h * 0.02);
+  ctx.bezierCurveTo(x + w - w * 0.05, y + bumpH + h * 0.05,
+                     x + w - w * 0.05, y + h * 0.35,
+                     x + w - r, y + h * 0.35);
+  // Right side
+  ctx.quadraticCurveTo(x + w, y + h * 0.35, x + w, y + h * 0.55);
+  ctx.quadraticCurveTo(x + w, y + h - r, x + w - r, y + h);
+  // Bottom
+  ctx.lineTo(x + r, y + h);
+  // Left side  
+  ctx.quadraticCurveTo(x, y + h - r, x, y + h * 0.55);
+  ctx.quadraticCurveTo(x, y + h * 0.35, x + w * 0.05, y + h * 0.35);
+  ctx.closePath();
+
+  // Fill with gradient
+  const grad = ctx.createLinearGradient(x, y, x, y + h);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(0.3, '#fefdfb');
+  grad.addColorStop(0.7, '#f5f0e8');
+  grad.addColorStop(1, '#ede4d4');
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.strokeStyle = '#d4c5b2';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // Shine
+  ctx.beginPath();
+  ctx.ellipse(cx - w * 0.15, y + h * 0.25, w * 0.12, h * 0.08, -0.3, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.fill();
+
+  // Happy face
+  const eyeY = y + h * 0.38;
+  const eyeR = w * 0.04;
+  // Eyes
+  ctx.fillStyle = '#5d4037';
+  ctx.beginPath();
+  ctx.arc(cx - w * 0.14, eyeY, eyeR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + w * 0.14, eyeY, eyeR, 0, Math.PI * 2);
+  ctx.fill();
+  // Eye shine
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(cx - w * 0.13, eyeY - eyeR * 0.3, eyeR * 0.35, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + w * 0.15, eyeY - eyeR * 0.3, eyeR * 0.35, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Rosy cheeks
+  ctx.fillStyle = 'rgba(255,150,150,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(cx - w * 0.25, eyeY + h * 0.06, w * 0.06, h * 0.03, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(cx + w * 0.25, eyeY + h * 0.06, w * 0.06, h * 0.03, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Smile
+  const smileY = eyeY + h * 0.08;
+  ctx.beginPath();
+  ctx.arc(cx, smileY, w * 0.1, 0.1, Math.PI - 0.1);
+  ctx.strokeStyle = '#5d4037';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawSpots() {
+  const time = Date.now() / 1000;
+  spots.forEach(spot => {
+    if (!spot.alive) return;
+    ctx.save();
+    const wx = Math.sin(time * 3 + spot.wiggle) * 1.5;
+    const wy = Math.cos(time * 3.7 + spot.wiggle) * 1.5;
+    ctx.translate(spot.x + wx, spot.y + wy);
+    
+    // Spot glow
+    const glow = ctx.createRadialGradient(0, 0, spot.r * 0.3, 0, 0, spot.r * 1.8);
+    glow.addColorStop(0, spot.color);
+    glow.addColorStop(0.5, spot.color + '88');
+    glow.addColorStop(1, 'transparent');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, spot.r * 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Spot core
+    const core = ctx.createRadialGradient(0, -spot.r * 0.2, spot.r * 0.1, 0, 0, spot.r);
+    core.addColorStop(0, 'rgba(0,0,0,0.15)');
+    core.addColorStop(0.7, spot.color);
+    core.addColorStop(1, 'rgba(0,0,0,0.25)');
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(0, 0, spot.r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Little eyes on spots (cute)
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(-spot.r * 0.25, -spot.r * 0.2, spot.r * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(spot.r * 0.25, -spot.r * 0.2, spot.r * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(-spot.r * 0.25, -spot.r * 0.2, spot.r * 0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(spot.r * 0.25, -spot.r * 0.2, spot.r * 0.1, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Angry eyebrows
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = spot.r * 0.1;
+    ctx.beginPath();
+    ctx.moveTo(-spot.r * 0.45, -spot.r * 0.43);
+    ctx.lineTo(-spot.r * 0.08, -spot.r * 0.35);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(spot.r * 0.08, -spot.r * 0.35);
+    ctx.lineTo(spot.r * 0.45, -spot.r * 0.43);
+    ctx.stroke();
+
+    ctx.restore();
+  });
+}
+
+function createParticles(x, y, color) {
+  for (let i = 0; i < 12; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2 + Math.random() * 5;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 3,
+      life: 1,
+      decay: 0.015 + Math.random() * 0.03,
+      color,
+      size: 3 + Math.random() * 5,
+    });
+  }
+}
+
+function createSparkles(x, y) {
+  for (let i = 0; i < 6; i++) {
+    particles.push({
+      x: x + (Math.random() - 0.5) * 40,
+      y: y + (Math.random() - 0.5) * 40,
+      vx: (Math.random() - 0.5) * 2,
+      vy: -Math.random() * 4 - 2,
+      life: 1,
+      decay: 0.02,
+      color: '#ffd700',
+      size: 4 + Math.random() * 4,
+      sparkle: true,
+    });
+  }
+}
+
+function updateParticles() {
+  particles = particles.filter(p => {
+    p.life -= p.decay;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.05;
+    return p.life > 0;
+  });
+}
+
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    if (p.sparkle) {
+      // Star shape
+      const s = p.size;
+      ctx.fillStyle = p.color;
+      ctx.translate(p.x, p.y);
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const a = (i * Math.PI * 2) / 5 - Math.PI / 2;
+        const r = i % 2 === 0 ? s : s * 0.4;
+        if (i === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+        else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  });
+}
+
+function drawWaterDrops() {
+  waterDrops.forEach(d => {
+    ctx.save();
+    ctx.globalAlpha = d.alpha;
+    ctx.fillStyle = '#4fc3f7';
+    ctx.beginPath();
+    ctx.ellipse(d.x, d.y, d.w * 0.5, d.h * 0.5, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    // Highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.beginPath();
+    ctx.arc(d.x - d.w * 0.1, d.y - d.h * 0.1, d.w * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
+function updateWater() {
+  waterDrops = waterDrops.filter(d => d.y < H + 50);
+  waterDrops.forEach(d => {
+    d.y += d.vy;
+    d.vy += 0.08;
+    d.alpha -= 0.002;
+  });
+}
+
+function spawnWater() {
+  if (phase !== 'flushing') return;
+  for (let i = 0; i < 5; i++) {
+    waterDrops.push({
+      x: tooth.x + Math.random() * tooth.w,
+      y: tooth.y - 10,
+      vy: 3 + Math.random() * 5,
+      w: 6 + Math.random() * 4,
+      h: 8 + Math.random() * 6,
+      alpha: 0.8 + Math.random() * 0.2,
+    });
+  }
+}
+
+function handleTap(ex, ey) {
+  if (phase === 'done') return;
+
+  if (phase === 'scrubbing') {
+    let hit = false;
+    spots.forEach(spot => {
+      if (!spot.alive) return;
+      const dx = ex - spot.x;
+      const dy = ey - spot.y;
+      if (Math.sqrt(dx * dx + dy * dy) < spot.r * 2.2) {
+        spot.alive = false;
+        cleaned++;
+        createParticles(spot.x, spot.y, spot.color);
+        createSparkles(spot.x, spot.y);
+        hit = true;
+      }
+    });
+    if (hit) {
+      scoreEl.textContent = `🧼 ${cleaned} / ${totalSpots} spots`;
+      if (cleaned >= totalSpots) {
+        startFlush();
+      }
+    }
+  }
+}
+
+function startFlush() {
+  phase = 'flushing';
+  flushProgress = 0;
+  msgEl.textContent = '💦 Time to FLUSH! 💦';
+  msgEl.classList.add('show');
+  createSparkles(tooth.x + tooth.w / 2, tooth.y + tooth.h / 2);
+}
+
+function drawFlushWater() {
+  if (phase !== 'flushing') return;
+  const cx = tooth.x + tooth.w / 2;
+  
+  // Water wave from top
+  const waveY = tooth.y + tooth.h * flushProgress;
+  
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  
+  // Water body
+  const grad = ctx.createLinearGradient(0, tooth.y, 0, tooth.y + tooth.h);
+  grad.addColorStop(0, '#4fc3f7');
+  grad.addColorStop(0.3, '#29b6f6');
+  grad.addColorStop(0.8, '#0288d1');
+  grad.addColorStop(1, '#01579b');
+  ctx.fillStyle = grad;
+  
+  ctx.beginPath();
+  ctx.moveTo(tooth.x - 10, tooth.y);
+  const time = Date.now() / 200;
+  for (let x = tooth.x - 10; x <= tooth.x + tooth.w + 10; x += 15) {
+    const wave = Math.sin((x + time * 30) * 0.04) * 8;
+    ctx.lineTo(x, waveY + wave);
+  }
+  ctx.lineTo(tooth.x + tooth.w + 10, tooth.y + tooth.h + 10);
+  ctx.lineTo(tooth.x - 10, tooth.y + tooth.h + 10);
+  ctx.closePath();
+  ctx.fill();
+
+  // Foam/bubbles on top
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  for (let x = tooth.x; x <= tooth.x + tooth.w; x += 20 + Math.random() * 15) {
+    const bx = x + Math.sin(time + x) * 5;
+    const by = waveY + Math.sin(time * 2 + x) * 3 - 5;
+    ctx.beginPath();
+    ctx.arc(bx, by, 4 + Math.random() * 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function loop() {
+  requestAnimationFrame(loop);
+  resize();
+
+  // Clear
+  ctx.fillStyle = '#e8f5e9';
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle background pattern (bubbles)
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  const time = Date.now() / 1000;
+  for (let i = 0; i < 8; i++) {
+    const bx = (Math.sin(time * 0.7 + i * 1.3) * 0.5 + 0.5) * W;
+    const by = (Math.cos(time * 0.5 + i * 1.7) * 0.5 + 0.5) * H;
+    ctx.beginPath();
+    ctx.arc(bx, by, 15 + Math.sin(time + i) * 10, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawTooth();
+  drawFlushWater();
+  drawSpots();
+  drawWaterDrops();
+  drawParticles();
+  updateParticles();
+  updateWater();
+
+  if (phase === 'flushing') {
+    flushProgress += 0.006;
+    sparkleTimer++;
+    if (sparkleTimer % 8 === 0) spawnWater();
+    if (flushProgress >= 1.0) {
+      phase = 'done';
+      msgEl.textContent = '🌟 ALL CLEAN! 🌟\nGreat job, Eva!';
+      msgEl.classList.add('show');
+      resetBtn.classList.add('show');
+      // Big celebration
+      for (let i = 0; i < 5; i++) {
+        createSparkles(
+          tooth.x + tooth.w * (0.2 + Math.random() * 0.6),
+          tooth.y + tooth.h * (0.2 + Math.random() * 0.6)
+        );
+      }
+    }
+  }
+
+  // Wiggle spots
+  spots.forEach(spot => { spot.wiggle += 0.03; });
+}
+
+// Touch and click handling
+canvas.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  handleTap(x, y);
+});
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+}, { passive: false });
+
+function resetGame() {
+  spots = [];
+  particles = [];
+  waterDrops = [];
+  init();
+}
+
+window.addEventListener('resize', resize);
+window.resetGame = resetGame;
+
+// Start!
+init();
+</script>
+</body>
+</html>
