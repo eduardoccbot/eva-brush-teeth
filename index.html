@@ -84,8 +84,10 @@ const COLORS = ['#ff6f91','#ff9671','#ffc75f','#845ec2','#00c9a7','#4d8076'];
 const PASTELS = ['#f3e5f5','#e8f5e9','#fff3e0','#e3f2fd','#fce4ec','#f1f8e9'];
 
 function resize() {
-  const r = canvas.getBoundingClientRect();
-  W = r.width; H = r.height;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
   canvas.width = W * (window.devicePixelRatio || 1);
   canvas.height = H * (window.devicePixelRatio || 1);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
